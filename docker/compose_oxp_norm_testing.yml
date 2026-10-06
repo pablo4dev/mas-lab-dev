@@ -1,0 +1,118 @@
+name: oxp
+
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/ # legit:ignore
+
+x-worker-env: &worker-env
+  <<: *rabbitmq-env
+  HOME: /oxp
+  MPLCONFIGDIR: /oxp/.config/matplotlib
+  API_BASE_URL: http://host.docker.internal:8081
+  NEO4J_HOST: neo4j:7687
+  NEO4J_URI: bolt://neo4j:7687
+  UV_LINK_MODE: copy
+  UV_PROJECT_ENVIRONMENT: /opt/venv
+  PYTHONUNBUFFERED: 1
+  CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:-host.docker.internal}
+  CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-8123}
+  CLICKHOUSE_USERNAME: ${CLICKHOUSE_USERNAME:-admin}
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
+
+x-worker-base: &worker-base
+  env_file: .env
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+    neo4j:
+      condition: service_healthy
+  volumes:
+    - ./mce_config.yaml:/oxp/mce_config.yaml
+    - /dev/null:/app/workflows/.env
+  environment: *worker-env
+
+services:
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD} # legit:ignore
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:latest
+    volumes:
+        - /$HOME/neo4j/logs:/logs
+        - /$HOME/neo4j/config:/config
+        - /$HOME/neo4j/data:/data
+        - /$HOME/neo4j/plugins:/plugins
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    restart: always
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-testpassword} # legit:ignore
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-claris}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USERNAME:-admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.121.0
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_started
+
+  norm:
+    <<: *worker-base
+    build:
+      context: .
+      dockerfile: workers/norm-worker/deploy/docker/Dockerfile
+      secrets:
+        - ARTIFACTORY_USERNAME
+        - ARTIFACTORY_PASSWORD
+    command: ["--max-sessions", "-1"]
+    environment:
+      <<: *worker-env
+      MAX_INFLIGHT_MESSAGES: ${NORM_MAX_INFLIGHT_MESSAGES:-64}
+    restart: always
+
+secrets:
+  ARTIFACTORY_USERNAME:
+    environment: "ARTIFACTORY_USERNAME"
+  ARTIFACTORY_PASSWORD:
+    environment: "ARTIFACTORY_PASSWORD"
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
