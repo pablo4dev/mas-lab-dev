@@ -85,10 +85,16 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.121.0
+    command: ["--config", "/etc/otelcol-contrib/config.yaml"]
     ports:
       - "4317:4317"
       - "4318:4318"
+    environment:
+      CLICKHOUSE_USERNAME: ${CLICKHOUSE_USERNAME:-admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
     restart: unless-stopped
+    volumes:
+      - ./otelcol-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
       clickhouse:
         condition: service_started
@@ -96,7 +102,7 @@ services:
   norm:
     <<: *worker-base
     build:
-      context: .
+      context: ../../../oxp-lib
       dockerfile: workers/norm-worker/deploy/docker/Dockerfile
       secrets:
         - ARTIFACTORY_USERNAME
@@ -106,6 +112,38 @@ services:
       <<: *worker-env
       MAX_INFLIGHT_MESSAGES: ${NORM_MAX_INFLIGHT_MESSAGES:-64}
     restart: always
+
+  noa-trip-planner:
+    profiles: ["with-noa"]
+    image: ${CLARIS_REGISTRY:-ghcr.io/cisco-eti/claris/container-images}/noa-trip-planner:${NOA_IMAGE_TAG:-latest}
+    platform: ${CLARIS_WORKER_PLATFORM:-linux/amd64}
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${NOA_API_PORT:-8125}:8125"
+    environment:
+      NOA_API_PORT: 8125
+      NOA_API_HOST: 0.0.0.0
+      OTLP_HTTP_ENDPOINT: http://otel-collector:4318
+      AI_GATEWAY_BASE_URL: ${AI_GATEWAY_BASE_URL}
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY}
+      NOA_LLM_MODEL: ${NOA_LLM_MODEL:-azure/gpt-4o}
+    restart: unless-stopped
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+  mas-lab:
+    profiles: ["with-mas-lab"]
+    image: alpine:3.20
+    command:
+      - sh
+      - -c
+      - |
+        echo "WARNING: To be implemented!" >&2
+        exit 1
+    restart: "no"
 
 secrets:
   ARTIFACTORY_USERNAME:
