@@ -4,7 +4,16 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$DOCKER_DIR/compose_oxp_norm_testing.yml"
-CLICKHOUSE_DB="${CLICKHOUSE_DATABASE:-claris}"
+
+# Load compose-local environment variables when present.
+if [[ -f "$DOCKER_DIR/.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$DOCKER_DIR/.env"
+  set +a
+fi
+
+CLICKHOUSE_DB="${CLICKHOUSE_DATABASE:-${database_name:-default}}"
 NEO4J_PASSWORD_VALUE="${NEO4J_PASSWORD:-testpassword}"
 
 show_otel_counts() {
@@ -47,7 +56,7 @@ get_available_sessions() {
 
   table_exists="$(docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database='default' AND name='otel_traces'" </dev/null 2>/dev/null || echo 0)"
   if [[ "$table_exists" == "1" ]]; then
-    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT SpanAttributes['session.id'] AS session_id FROM default.otel_traces WHERE mapContains(SpanAttributes, 'session.id') AND SpanAttributes['session.id'] != '' ORDER BY session_id FORMAT TSV" </dev/null 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT multiIf(session_id != '', session_id, multiIf(position(SpanAttributes['session.id'], '_') > 0, substring(SpanAttributes['session.id'], position(SpanAttributes['session.id'], '_') + 1), SpanAttributes['session.id'])) AS session_id FROM default.otel_traces WHERE mapContains(SpanAttributes, 'session.id') AND SpanAttributes['session.id'] != '' ORDER BY session_id FORMAT TSV" </dev/null 2>/dev/null || true
   fi
 
   table_exists="$(docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database='default' AND name='trace_labels'" </dev/null 2>/dev/null || echo 0)"
