@@ -17,7 +17,7 @@ exporters:
     verbosity: normal
   clickhouse:
     endpoint: tcp://clickhouse:9000?dial_timeout=10s
-    database: default
+    database: ${CLICKHOUSE_DATABASE}
     username: ${CLICKHOUSE_USERNAME}
     password: ${CLICKHOUSE_PASSWORD}
     logs_table_name: otel_logs

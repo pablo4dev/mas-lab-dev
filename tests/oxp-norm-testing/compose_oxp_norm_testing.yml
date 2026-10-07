@@ -75,13 +75,65 @@ services:
       - "9000:9000"
     restart: unless-stopped
     environment:
-      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-claris}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-default}
       CLICKHOUSE_USER: ${CLICKHOUSE_USERNAME:-admin}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck: # runs SELECT 1, so other services can wait until the database accepts queries.
+      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # One-shot port of observe-and-explain-platform's clickhouse-init-job.yaml
+  # (Helm post-install hook). Runs on every `up`; every statement is idempotent,
+  # so it only changes anything the first time the database is created.
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:24.8
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: "no"
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_USER: ${CLICKHOUSE_USERNAME:-admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-default}
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        ch() {
+          clickhouse-client --host "$$CLICKHOUSE_HOST" --port "$$CLICKHOUSE_PORT" \
+            --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --query "$$1"
+        }
+
+        # otel_traces is created lazily by the otel-collector's clickhouse exporter
+        # on its first connection, so wait for it instead of failing on UNKNOWN_TABLE.
+        echo "Waiting for table $$CLICKHOUSE_DATABASE.otel_traces to exist"
+        elapsed=0
+        until [ "$$(ch "EXISTS TABLE $$CLICKHOUSE_DATABASE.otel_traces")" = "1" ]; do
+          if [ "$$elapsed" -ge 120 ]; then
+            echo "Timed out waiting for $$CLICKHOUSE_DATABASE.otel_traces (has the otel-collector received any spans yet?)"
+            exit 1
+          fi
+          sleep 2
+          elapsed=$$((elapsed + 2))
+        done
+
+        ch "ALTER TABLE $$CLICKHOUSE_DATABASE.otel_traces ADD COLUMN IF NOT EXISTS application_id String DEFAULT SpanAttributes['application_id']"
+        ch "ALTER TABLE $$CLICKHOUSE_DATABASE.otel_traces ADD COLUMN IF NOT EXISTS session_id String DEFAULT multiIf(position(SpanAttributes['session.id'], '_') > 0, substring(SpanAttributes['session.id'], position(SpanAttributes['session.id'], '_') + 1), SpanAttributes['session.id'])"
+        ch "ALTER TABLE $$CLICKHOUSE_DATABASE.otel_traces ADD COLUMN IF NOT EXISTS agent_id String DEFAULT SpanAttributes['agent_id']"
+        # Drop byte-identical blocks re-sent by exporter retries (plain MergeTree).
+        ch "ALTER TABLE $$CLICKHOUSE_DATABASE.otel_traces MODIFY SETTING non_replicated_deduplication_window = 100"
+
+        echo "ClickHouse setup completed"
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.121.0
@@ -90,6 +142,7 @@ services:
       - "4317:4317"
       - "4318:4318"
     environment:
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-default}
       CLICKHOUSE_USERNAME: ${CLICKHOUSE_USERNAME:-admin}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin}
     restart: unless-stopped
