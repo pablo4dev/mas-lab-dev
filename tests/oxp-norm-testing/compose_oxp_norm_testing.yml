@@ -260,6 +260,13 @@ services:
       file: ../../docker/compose.yaml
       service: ui
 
+  cli:
+    profiles: ["with-mas-lab"]
+    image: mas-lab-backend:oxp-norm-testing
+    extends:
+      file: ../../docker/compose.yaml
+      service: cli
+
 secrets:
   ARTIFACTORY_USERNAME:
     environment: "ARTIFACTORY_USERNAME"
