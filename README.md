@@ -23,25 +23,25 @@ contracts, reproducible experiments, and built-in observability.
 ## Get started
 
 <!-- TEMPORARY: remove this note after the first successful public PyPI upload. -->
-> **PyPI publication pending:** the package names and installation path are
-> prepared, but the public packages are not uploaded yet. Use the Docker or
-> developer workspace paths below until the first PyPI release is complete.
+> **PyPI publication pending:** the package names are reserved, but the public
+> packages are not uploaded yet. Use the developer workspace or Docker path for
+> now.
 
 ```bash
-# 1 — Install the published packages
-uv venv
-uv pip install mas-lab mas-library-standard mas-library-samples
+# 1 — Set up a local developer environment from this checkout
+uv venv .venv
+uv sync
 export PATH="$PWD/.venv/bin:$PATH"
 
 # 2 — Configure LLM access (interactive, writes ~/.config/mas/config.yaml)
 mas-lab init
 
-# 3 — Export the API key printed by init
+# 3 — Export your provider API key into the env var configured by init
 export OPENAI_API_KEY=<your-key>
 
 # 4 — Run the trip-planner sample
+MAS_CTL_MODEL=generic-model \
 mas-ctl run-mas library-samples/apps/trip-planner/mas.yaml \
-  --infra-ref standard:openai \
   -q "Plan a trip from Celestia to Verdantia"
 
 # 5 — Inspect traces
