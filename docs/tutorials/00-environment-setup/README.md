@@ -42,9 +42,22 @@ scripts are the same as in the source and Docker paths.
 
 ### 1 — Create a venv and install the release
 
+Until the first public release is uploaded, do not run the install command
+below in this repository checkout. Use Path B (Developers) or the Fast path
+(Docker only) instead.
+
 ```bash
+# For the future public release (not available yet):
 uv venv .venv
 uv pip install mas-lab mas-library-standard mas-library-samples
+export PATH="$PWD/.venv/bin:$PATH"
+```
+
+If you are in this source checkout today, use:
+
+```bash
+uv venv .venv
+uv sync
 export PATH="$PWD/.venv/bin:$PATH"
 ```
 

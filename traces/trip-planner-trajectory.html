@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MAS Trajectory</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; background: #f9fafb; }
+    .mermaid { background: white; padding: 1rem; border-radius: 8px;
+                box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+    h1 { color: #1e293b; font-size: 1.4rem; }
+    p.meta { color: #64748b; font-size: .85rem; }
+    .has-tip { cursor: help; text-decoration: underline dotted #94a3b8; }
+    .has-hl  { cursor: pointer; }
+    .has-agent-hl { cursor: default; }
+  </style>
+</head>
+<body>
+  <h1>MAS Agent Trajectory</h1>
+  <p class="meta">2 delegation(s) · 6 agent(s)</p>
+  <div class="mermaid">
+    sequenceDiagram
+        actor User
+        participant mas
+        participant moderator
+        participant itinerary_agent
+        participant schedule_agent
+        participant concierge_agent
+
+        User->>moderator: Plan a trip from Celestia to Verdantia
+        moderator-->>User: response
+  </div>
+  <script>
+    const _TIPS      = {};
+    const _HLABELS   = new Set([]);
+    const _HAGENTS   = new Set([]);
+    mermaid.initialize({startOnLoad: false, theme: 'default'});
+    document.addEventListener('DOMContentLoaded', () => {
+      mermaid.run({querySelector: '.mermaid'}).then(() => {
+        document.querySelectorAll('.mermaid svg text, .mermaid svg tspan').forEach(el => {
+          const key = el.textContent.trim();
+          // ── tooltips ──
+          if (_TIPS[key]) {
+            const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            t.textContent = _TIPS[key];
+            el.parentElement.insertBefore(t, el.parentElement.firstChild);
+            el.classList.add('has-tip');
+          }
+          // ── highlights (amber recolor) ──
+          if (_HLABELS.has(key)) {
+            el.style.fill = '#92400e';
+            el.style.fontWeight = 'bold';
+            el.classList.add('has-hl');
+            try {
+              const bbox = el.getBBox();
+              const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+              rect.setAttribute('x',      String(bbox.x - 3));
+              rect.setAttribute('y',      String(bbox.y));
+              rect.setAttribute('width',  String(bbox.width + 6));
+              rect.setAttribute('height', String(bbox.height));
+              rect.setAttribute('fill',   '#fef3c7');
+              rect.setAttribute('rx',     '3');
+              rect.setAttribute('stroke', '#f59e0b');
+              rect.setAttribute('stroke-width', '1.5');
+              el.parentNode.insertBefore(rect, el);
+            } catch (_) {}
+            // recolor any arrow line in the same message group
+            const g = el.closest('g');
+            if (g) {
+              g.querySelectorAll('line, path[d]').forEach(arrow => {
+                if (!arrow.getAttribute('d')?.startsWith('M0')) {
+                  arrow.style.stroke = '#d97706';
+                  arrow.style.strokeWidth = '2.5';
+                }
+              });
+            }
+          }
+          // ── agent node highlights (participant/actor boxes) ──
+          if (_HAGENTS.has(key)) {
+            el.style.fill = '#d97706';
+            el.style.fontWeight = 'bold';
+            el.classList.add('has-agent-hl');
+            const g2 = el.closest('g');
+            if (g2) {
+              g2.querySelectorAll('rect, polygon').forEach(s => {
+                s.style.fill   = '#451a03';
+                s.style.stroke = '#d97706';
+                s.style.strokeWidth = '2';
+              });
+            }
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

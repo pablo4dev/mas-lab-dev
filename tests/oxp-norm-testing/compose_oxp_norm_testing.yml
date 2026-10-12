@@ -246,16 +246,19 @@ services:
       mcp-server:
         condition: service_started
 
-  mas-lab:
+  backend:
     profiles: ["with-mas-lab"]
-    image: alpine:3.20
-    command:
-      - sh
-      - -c
-      - |
-        echo "WARNING: To be implemented!" >&2
-        exit 1
-    restart: "no"
+    image: mas-lab-backend:oxp-norm-testing
+    extends:
+      file: ../../docker/compose.yaml
+      service: backend
+
+  ui:
+    profiles: ["with-mas-lab"]
+    image: mas-lab-ui:oxp-norm-testing
+    extends:
+      file: ../../docker/compose.yaml
+      service: ui
 
 secrets:
   ARTIFACTORY_USERNAME:
