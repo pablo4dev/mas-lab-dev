@@ -252,6 +252,63 @@ action_seven() {
   echo
 }
 
+action_nine() {
+  local overlay_path="/workspace/tests/oxp-norm-testing/overlays/observability-dual.yaml"
+
+  echo
+  echo "Running MAS-LAB-NOA sample with dual observability overlay"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Error: docker is not installed or not in PATH."
+    echo
+    return
+  fi
+
+  if ! docker compose -f "$COMPOSE_FILE" ps --services --status running | grep -qx "cli"; then
+    echo "Error: cli service is not running."
+    echo "Start it with: docker compose -f $COMPOSE_FILE --profile with-mas-lab up -d cli"
+    echo
+    return
+  fi
+
+  if ! docker compose -f "$COMPOSE_FILE" exec -T cli test -f "$overlay_path"; then
+    echo "Error: dual observability overlay not found at $overlay_path inside the container."
+    echo
+    return
+  fi
+
+  echo "Checking OTLP exporter dependency inside cli container..."
+  if ! docker compose -f "$COMPOSE_FILE" exec -T cli sh -lc 'python -c "import opentelemetry.exporter.otlp.proto.http.trace_exporter" >/dev/null 2>&1'; then
+    local otel_sdk_version
+    otel_sdk_version="$(docker compose -f "$COMPOSE_FILE" exec -T cli sh -lc 'python -c "import importlib.metadata as m; print(m.version(\"opentelemetry-sdk\"))"' 2>/dev/null || true)"
+
+    echo "Installing missing package: opentelemetry-exporter-otlp-proto-http"
+    if [[ -n "$otel_sdk_version" ]]; then
+      if ! docker compose -f "$COMPOSE_FILE" exec -T cli sh -lc "uv pip install --python /opt/mas-lab/.venv/bin/python opentelemetry-exporter-otlp-proto-http==$otel_sdk_version"; then
+        echo "Error: failed to install OTLP exporter package in cli container."
+        echo "Tip: check internet access from container or install it in the image later for persistence."
+        echo
+        return
+      fi
+    elif ! docker compose -f "$COMPOSE_FILE" exec -T cli sh -lc 'uv pip install --python /opt/mas-lab/.venv/bin/python opentelemetry-exporter-otlp-proto-http'; then
+      echo "Error: failed to install OTLP exporter package in cli container."
+      echo "Tip: check internet access from container or install it in the image later for persistence."
+      echo
+      return
+    fi
+  fi
+
+  if ! docker compose -f "$COMPOSE_FILE" exec \
+    -e MAS_CTL_MODEL=generic-model \
+    cli sh -lc 'OPENAI_API_KEY="$AI_GATEWAY_API_KEY" /usr/local/bin/mas-lab-entrypoint mas-ctl run-mas /opt/mas-lab/library-samples/apps/trip-planner/mas.yaml -q "Plan a trip from Celestia to Verdantia" -o /workspace/tests/oxp-norm-testing/overlays/observability-dual.yaml'; then
+    echo
+    echo "Warning: MAS-LAB dual mode sample command failed."
+    echo "Ensure profile with-mas-lab is up and AI_GATEWAY_API_KEY is set in .env."
+  fi
+
+  echo
+}
+
 action_three() {
   show_otel_counts
 }
@@ -381,6 +438,7 @@ show_menu() {
   echo "5) Wipe ClickHouse table contents"
   echo "6) Show Neo4j node/relationship counts"
   echo "7) POST sample question to NOA A2A /ask"
+  echo "8) Send sample question to MAS-LAB-NOA (dual observability mode)"
   echo "q) Quit"
   echo
 }
@@ -416,13 +474,16 @@ main() {
       7)
         action_seven
         ;;
+      8)
+        action_nine
+        ;;
       q|Q)
         echo "Exiting interactive test menu."
         break
         ;;
       *)
         echo
-        echo "Invalid selection. Please choose 1, 2, 3, 4, 5, 6, 7, or q."
+        echo "Invalid selection. Please choose 1, 2, 3, 4, 5, 6, 7, 8, or q."
         echo
         ;;
     esac
