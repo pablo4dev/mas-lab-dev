@@ -4,6 +4,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$DOCKER_DIR/compose_oxp_norm_testing.yml"
+SESSION_SOURCE_FILE="$DOCKER_DIR/.session_source_map.tsv"
 
 # Load compose-local environment variables when present.
 if [[ -f "$DOCKER_DIR/.env" ]]; then
@@ -15,6 +16,29 @@ fi
 
 CLICKHOUSE_DB="${CLICKHOUSE_DATABASE:-${database_name:-default}}"
 NEO4J_PASSWORD_VALUE="${NEO4J_PASSWORD:-testpassword}"
+
+record_session_source() {
+  local session_id="$1"
+  local mas_id="$2"
+  local tmp
+
+  [[ -z "$session_id" || -z "$mas_id" ]] && return
+
+  tmp="${SESSION_SOURCE_FILE}.tmp"
+  if [[ -f "$SESSION_SOURCE_FILE" ]]; then
+    grep -Fv "${session_id}"$'\t' "$SESSION_SOURCE_FILE" > "$tmp" || true
+    mv "$tmp" "$SESSION_SOURCE_FILE"
+  fi
+
+  printf '%s\t%s\n' "$session_id" "$mas_id" >> "$SESSION_SOURCE_FILE"
+}
+
+lookup_session_source() {
+  local session_id="$1"
+
+  [[ -z "$session_id" || ! -f "$SESSION_SOURCE_FILE" ]] && return 1
+  awk -F'\t' -v sid="$session_id" '$1 == sid {print $2; found=1} END {exit(found ? 0 : 1)}' "$SESSION_SOURCE_FILE"
+}
 
 show_otel_counts() {
   echo
@@ -29,7 +53,7 @@ show_otel_counts() {
 
 show_neo4j_counts() {
   echo
-  echo "Neo4j counts:"
+  echo "addNeo4j counts:"
 
   if ! command -v docker >/dev/null 2>&1; then
     echo "Error: docker is not installed or not in PATH."
@@ -56,23 +80,42 @@ get_available_sessions() {
 
   table_exists="$(docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database='default' AND name='otel_traces'" </dev/null 2>/dev/null || echo 0)"
   if [[ "$table_exists" == "1" ]]; then
-    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT multiIf(session_id != '', session_id, multiIf(position(SpanAttributes['session.id'], '_') > 0, substring(SpanAttributes['session.id'], position(SpanAttributes['session.id'], '_') + 1), SpanAttributes['session.id'])) AS session_id FROM default.otel_traces WHERE mapContains(SpanAttributes, 'session.id') AND SpanAttributes['session.id'] != '' ORDER BY session_id FORMAT TSV" </dev/null 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT multiIf(application_id != '', application_id, multiIf(mapContains(SpanAttributes, 'application_id') AND SpanAttributes['application_id'] != '', SpanAttributes['application_id'], multiIf(position(SpanAttributes['session.id'], '_') > 0, substring(SpanAttributes['session.id'], 1, position(SpanAttributes['session.id'], '_') - 1), 'unknown'))) AS app_name, SpanAttributes['session.id'] AS session_id FROM default.otel_traces WHERE mapContains(SpanAttributes, 'session.id') AND SpanAttributes['session.id'] != '' ORDER BY app_name, session_id FORMAT TSV" </dev/null 2>/dev/null || true
   fi
 
   table_exists="$(docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database='default' AND name='trace_labels'" </dev/null 2>/dev/null || echo 0)"
   if [[ "$table_exists" == "1" ]]; then
-    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT session_id FROM default.trace_labels WHERE session_id != '' ORDER BY session_id FORMAT TSV" </dev/null 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT 'unknown' AS app_name, session_id FROM default.trace_labels WHERE session_id != '' ORDER BY app_name, session_id FORMAT TSV" </dev/null 2>/dev/null || true
   fi
 }
 
 select_session() {
+  local apps=()
   local sessions=()
   local selection
   local idx=1
   local line
+  local app_name
+  local session_id
+  local source_mas_id
 
   while IFS= read -r line; do
-    [[ -n "$line" ]] && sessions+=("$line")
+    [[ -z "$line" ]] && continue
+
+    app_name=""
+    session_id=""
+    IFS=$'\t' read -r app_name session_id <<< "$line"
+
+    [[ -z "$app_name" ]] && app_name="unknown"
+    [[ -z "$session_id" ]] && continue
+
+    source_mas_id="$(lookup_session_source "$session_id" 2>/dev/null || true)"
+    if [[ -n "$source_mas_id" ]]; then
+      app_name="$source_mas_id"
+    fi
+
+    apps+=("$app_name")
+    sessions+=("$session_id")
   done < <(get_available_sessions | sed '/^$/d' | sort -u)
 
   if (( ${#sessions[@]} == 0 )); then
@@ -82,8 +125,10 @@ select_session() {
 
   echo >&2
   echo "Select a session to trigger norm-worker:" >&2
+  echo "  #) [mas_id] session_id" >&2
+  echo "  --  ----------------------  ----------------------------------------" >&2
   for selection in "${sessions[@]}"; do
-    echo "  $idx) $selection" >&2
+    echo "  $idx) [${apps[idx-1]}] $selection" >&2
     idx=$((idx + 1))
   done
   echo "  q) Cancel" >&2
@@ -140,6 +185,9 @@ action_one() {
 }
 
 action_two() {
+  local response
+  local session_id
+
   echo
   echo "Calling NOA ask endpoint (http://localhost:8125/ask)"
 
@@ -149,16 +197,55 @@ action_two() {
     return
   fi
 
-  if ! curl -sS -X POST "http://localhost:8125/ask" \
+  if ! response="$(curl -sS -X POST "http://localhost:8125/ask" \
     -H "Content-Type: application/json" \
     -d '{
       "question": "Plan a 3-day trip to Tokyo under $1500",
       "thread_id": "demo-thread-1",
       "debugging": true
-    }'; then
+    }')"; then
     echo
     echo "Warning: request failed. Ensure noa-trip-planner is running on port 8125."
   else
+    echo "$response"
+    session_id="$(printf '%s' "$response" | sed -n 's/.*"session_id":"\([^"]*\)".*/\1/p' | head -n 1)"
+    if [[ -n "$session_id" ]]; then
+      record_session_source "$session_id" "noa-trip-planner-mas"
+    fi
+    show_otel_counts
+  fi
+
+  echo
+}
+
+action_seven() {
+  local response
+  local session_id
+
+  echo
+  echo "Calling NOA A2A ask endpoint (http://localhost:8126/ask)"
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "Error: curl is not installed or not in PATH."
+    echo
+    return
+  fi
+
+  if ! response="$(curl -sS -X POST "http://localhost:8126/ask" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "question": "Plan a 3-day trip to Tokyo under $1500",
+      "thread_id": "demo-thread-a2a-1",
+      "debugging": true
+    }')"; then
+    echo
+    echo "Warning: request failed. Ensure noa-trip-planner-a2a is running on port 8126 (profile with-noa-a2a)."
+  else
+    echo "$response"
+    session_id="$(printf '%s' "$response" | sed -n 's/.*"session_id":"\([^"]*\)".*/\1/p' | head -n 1)"
+    if [[ -n "$session_id" ]]; then
+      record_session_source "$session_id" "noa-a2a-trip-planner-mas"
+    fi
     show_otel_counts
   fi
 
@@ -293,6 +380,7 @@ show_menu() {
   echo "4) Trigger norm-worker from selected session"
   echo "5) Wipe ClickHouse table contents"
   echo "6) Show Neo4j node/relationship counts"
+  echo "7) POST sample question to NOA A2A /ask"
   echo "q) Quit"
   echo
 }
@@ -325,13 +413,16 @@ main() {
       6)
         action_six
         ;;
+      7)
+        action_seven
+        ;;
       q|Q)
         echo "Exiting interactive test menu."
         break
         ;;
       *)
         echo
-        echo "Invalid selection. Please choose 1, 2, 3, 4, 5, 6, or q."
+        echo "Invalid selection. Please choose 1, 2, 3, 4, 5, 6, 7, or q."
         echo
         ;;
     esac
