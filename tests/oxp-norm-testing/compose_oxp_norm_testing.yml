@@ -252,6 +252,21 @@ services:
     extends:
       file: ../../docker/compose.yaml
       service: backend
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: ${MAS_OTEL_SERVICE_NAME:-mas-lab-runtime}
+      OTEL_RESOURCE_ATTRIBUTES: ${MAS_OTEL_RESOURCE_ATTRIBUTES:-application_id=mas-lab-runtime}
+    depends_on:
+      otel-collector:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
 
   ui:
     profiles: ["with-mas-lab"]
@@ -266,6 +281,21 @@ services:
     extends:
       file: ../../docker/compose.yaml
       service: cli
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: ${MAS_OTEL_SERVICE_NAME:-mas-lab-runtime}
+      OTEL_RESOURCE_ATTRIBUTES: ${MAS_OTEL_RESOURCE_ATTRIBUTES:-application_id=mas-lab-runtime}
+    depends_on:
+      otel-collector:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
 
 secrets:
   ARTIFACTORY_USERNAME:
