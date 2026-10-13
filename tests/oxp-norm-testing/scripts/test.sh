@@ -427,6 +427,59 @@ action_six() {
   show_neo4j_counts
 }
 
+action_eight() {
+  local confirm
+  local neo4j_data_dir="$HOME/neo4j/data"
+
+  echo
+  echo "This will fully reset Neo4j persisted data (including labels/types/indexes)."
+  echo "All graph data and schema metadata will be lost."
+  read -r -p "Type WIPE to continue: " confirm
+
+  if [[ "$confirm" != "WIPE" ]]; then
+    echo "Canceled."
+    echo
+    return
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Error: docker is not installed or not in PATH."
+    echo
+    return
+  fi
+
+  if [[ ! -d "$neo4j_data_dir" ]]; then
+    echo "Error: Neo4j data directory not found at $neo4j_data_dir"
+    echo "Check the neo4j volume mapping in $COMPOSE_FILE."
+    echo
+    return
+  fi
+
+  echo "Stopping neo4j service..."
+  if ! docker compose -f "$COMPOSE_FILE" stop neo4j >/dev/null; then
+    echo "Warning: failed to stop neo4j cleanly; continuing with data reset."
+  fi
+
+  echo "Deleting Neo4j persisted data in $neo4j_data_dir ..."
+  if ! docker run --rm -v "$neo4j_data_dir:/wipe" busybox sh -c 'find /wipe -mindepth 1 -delete'; then
+    echo "Error: failed to clear Neo4j persisted data."
+    echo "Neo4j will remain stopped to avoid using a partial state."
+    echo
+    return
+  fi
+
+  echo "Starting neo4j service..."
+  if docker compose -f "$COMPOSE_FILE" up -d neo4j >/dev/null; then
+    echo "Neo4j reset completed."
+    show_neo4j_counts
+  else
+    echo "Warning: Neo4j data was wiped, but restart failed."
+    echo "Start it with: docker compose -f $COMPOSE_FILE up -d neo4j"
+  fi
+
+  echo
+}
+
 show_menu() {
   echo "======================================"
   echo " Interactive Test Menu"
@@ -438,7 +491,8 @@ show_menu() {
   echo "5) Wipe ClickHouse table contents"
   echo "6) Show Neo4j node/relationship counts"
   echo "7) POST sample question to NOA A2A /ask"
-  echo "8) Send sample question to MAS-LAB-NOA (dual observability mode)"
+  echo "8) Wipe Neo4j graph data"
+  echo "9) Send sample question to MAS-LAB-NOA (dual observability mode)"
   echo "q) Quit"
   echo
 }
@@ -475,6 +529,9 @@ main() {
         action_seven
         ;;
       8)
+        action_eight
+        ;;
+      9)
         action_nine
         ;;
       q|Q)
@@ -483,7 +540,7 @@ main() {
         ;;
       *)
         echo
-        echo "Invalid selection. Please choose 1, 2, 3, 4, 5, 6, 7, 8, or q."
+        echo "Invalid selection. Please choose 1, 2, 3, 4, 5, 6, 7, 8, 9, or q."
         echo
         ;;
     esac
