@@ -248,6 +248,13 @@ services:
 
   backend:
     profiles: ["with-mas-lab"]
+    # !!! TEMPORARY LOCAL BUILD — REVERT BEFORE MERGING TO main !!!
+    # Builds mas-lab-backend:oxp-norm-testing from source locally instead of
+    # relying on a prebuilt/pulled image. Delete the `build:` block below to
+    # revert to the inherited image behaviour before merging.
+    build:
+      context: ../..
+      dockerfile: docker/backend/Dockerfile
     image: mas-lab-backend:oxp-norm-testing
     extends:
       file: ../../docker/compose.yaml
