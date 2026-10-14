@@ -6,8 +6,8 @@ import json
 
 from mas.library.standard.lib.observability.otel.topology import (
     build_topology,
-    determinism_score,
     derive_app_name,
+    determinism_score,
     graph_span_attributes,
     has_topology,
     topology_dynamism,
@@ -21,14 +21,14 @@ def test_build_topology_nodes_edges_and_kinds() -> None:
         {"kind": "agent_communication", "source_agent_id": "worker", "target_agent_id": "planner"},
     ]
     topo = build_topology(events)
-    assert {n["id"] for n in topo["nodes"]} == {"planner", "worker"}
+    assert set(topo["nodes"]) == {"planner", "worker"}
     assert len(topo["edges"]) == 2
     assert {e["kind"] for e in topo["edges"]} == {"routing", "communication"}
 
 
 def test_graph_span_attributes_and_scores() -> None:
     topo = {
-        "nodes": [{"id": "a", "name": "a"}, {"id": "b", "name": "b"}],
+        "nodes": {"a": {"id": "a", "name": "a"}, "b": {"id": "b", "name": "b"}},
         "edges": [
             {"source": "a", "target": "b", "conditional": False},
             {"source": "b", "target": "a", "conditional": True},
@@ -42,7 +42,7 @@ def test_graph_span_attributes_and_scores() -> None:
 
 
 def test_topology_helpers_static_empty_and_app_name_derivation() -> None:
-    static_topo = {"nodes": [{"id": "a", "name": "a"}], "edges": []}
+    static_topo = {"nodes": {"a": {"id": "a", "name": "a"}}, "edges": []}
     assert topology_dynamism(static_topo) == "static"
     assert determinism_score(static_topo) == 1.0
     assert has_topology(static_topo)

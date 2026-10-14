@@ -22,7 +22,7 @@ def test_build_topology_string_agent_ids_and_execution_agents() -> None:
         {"kind": "mas_call_start", "agent_id": "caller"},
     ]
     topo = build_topology(events)
-    assert {n["id"] for n in topo["nodes"]} == {"planner", "worker", "solo", "caller"}
+    assert set(topo["nodes"]) == {"planner", "worker", "solo", "caller"}
     assert topo["edges"] == []
 
 
@@ -40,11 +40,11 @@ def test_build_topology_selected_agent_and_conditional_routing() -> None:
 def test_build_topology_agent_dict_name_fallback() -> None:
     events = [{"kind": "system_specification", "agents": [{"name": "named"}]}]
     topo = build_topology(events)
-    assert {n["id"] for n in topo["nodes"]} == {"named"}
+    assert set(topo["nodes"]) == {"named"}
 
 
 def test_graph_span_attributes_custom_protocol() -> None:
-    topo = {"nodes": [{"id": "a", "name": "a"}], "edges": []}
+    topo = {"nodes": {"a": {"id": "a", "name": "a"}}, "edges": []}
     attrs = graph_span_attributes(topo, protocol="A2A")
     assert attrs["gen_ai.ioa.graph.protocol"] == "A2A"
 

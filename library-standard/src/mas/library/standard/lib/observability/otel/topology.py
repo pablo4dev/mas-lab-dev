@@ -11,6 +11,7 @@ be rendered and topology-dependent processing fails.
 Topology is derived from the native event stream: nodes = observed agents,
 edges = ``source_agent_id → target_agent_id`` handoffs (routing / communication).
 """
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,11 @@ OBSERVE_SPAN_KIND_ATTR = "ioa_observe.span.kind"
 
 
 def build_topology(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build a ``{"nodes": [...], "edges": [...]}`` topology from native events."""
+    """Build a ``{"nodes": {id: {...}}, "edges": [...]}`` topology from native events.
+
+    ``nodes`` is a mapping keyed by node id (the IOA Observe ``@graph`` contract
+    consumers expect), not a list.
+    """
     spec = next((e for e in events if e.get("kind") == "system_specification"), None)
     agents: set[str] = set()
     edges: dict[tuple[str, str], dict[str, Any]] = {}
@@ -46,15 +51,18 @@ def build_topology(events: list[dict[str, Any]]) -> dict[str, Any]:
             agents.add(str(src))
             agents.add(str(tgt))
             key = (str(src), str(tgt))
-            edges.setdefault(key, {
-                "source": str(src),
-                "target": str(tgt),
-                "kind": "communication" if kind.startswith("agent_communication") else "routing",
-                "conditional": kind in ("routing", "routing_result"),
-            })
+            edges.setdefault(
+                key,
+                {
+                    "source": str(src),
+                    "target": str(tgt),
+                    "kind": "communication" if kind.startswith("agent_communication") else "routing",
+                    "conditional": kind in ("routing", "routing_result"),
+                },
+            )
 
     return {
-        "nodes": [{"id": a, "name": a} for a in sorted(agents)],
+        "nodes": {a: {"id": a, "name": a} for a in sorted(agents)},
         "edges": [edges[k] for k in sorted(edges)],
     }
 
