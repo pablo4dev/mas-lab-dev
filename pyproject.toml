@@ -26,6 +26,9 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.optional-dependencies]
+oxp-testing = ["mas-library-kg[graph,neo4j,verify]"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mas_lab_workspace"]
 

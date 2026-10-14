@@ -317,13 +317,55 @@ action_nine() {
     echo
     echo "Warning: MAS-LAB dual mode sample command failed."
     echo "Ensure profile with-mas-lab is up and AI_GATEWAY_API_KEY is set in .env."
+    return 1
   fi
+
+  local archive_root="$DOCKER_DIR/sandbox/traces"
+  local archive_dir
+  if ! mkdir -p "$archive_root" ||
+    ! archive_dir="$(mktemp -d "$archive_root/option-9-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")"; then
+    echo "Error: could not create a sandbox directory for the option-9 trace."
+    return 1
+  fi
+  if ! docker compose -f "$COMPOSE_FILE" cp \
+    cli:/workspace/tests/oxp-norm-testing/sandbox/traces/events.jsonl "$archive_dir/events.jsonl" ||
+    [[ ! -s "$archive_dir/events.jsonl" ]]; then
+    echo "Error: could not save a nonempty option-9 trace to $archive_dir/events.jsonl."
+    return 1
+  fi
+  echo "Saved option-9 native trace: $archive_dir/events.jsonl"
+  echo "This is a copy of the accumulated trace; select its last appended run for this execution."
 
   echo
 }
 
 action_three() {
   show_otel_counts
+}
+
+action_kg_artifacts() {
+  local action="$1"
+  local helper="/workspace/tests/oxp-norm-testing/scripts/kg_artifacts.py"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Error: docker is not installed or not in PATH."
+    return 1
+  fi
+  if ! docker compose -f "$COMPOSE_FILE" ps --services --status running | grep -qx "cli"; then
+    echo "Error: cli service is not running."
+    echo "Start it with: docker compose -f $COMPOSE_FILE --profile with-mas-lab up -d cli"
+    return 1
+  fi
+  if ! NEO4J_PASSWORD="$NEO4J_PASSWORD_VALUE" docker compose -f "$COMPOSE_FILE" exec \
+    -e NEO4J_URI=bolt://neo4j:7687 \
+    -e "NEO4J_USER=${NEO4J_USER:-neo4j}" \
+    -e "NEO4J_DB_AGENT=${NEO4J_DB_AGENT:-neo4j}" \
+    -e NEO4J_PASSWORD \
+    cli uv run --project /opt/mas-lab --locked --no-dev --extra oxp-testing python "$helper" "$action"; then
+    echo "Error: KG $action action failed or was canceled. No Neo4j writes were requested."
+    echo "For missing dependencies, rebuild the with-mas-lab image; see the testing README."
+    return 1
+  fi
 }
 
 action_four() {
@@ -493,6 +535,29 @@ action_eight() {
   echo
 }
 
+advanced_menu() {
+  local choice
+  while true; do
+    echo
+    echo " Advanced KG Menu"
+    echo "10) Export a native run to JSON-LD (no Neo4j writes)"
+    echo "11) Export a Neo4j session to JSON-LD (read-only snapshot)"
+    echo "12) Compare two exported KG files"
+    echo "b) Back to normal menu"
+    if ! read -r -p "Choose an advanced action: " choice; then
+      echo "Input stream closed. Returning to normal menu."
+      return
+    fi
+    case "$choice" in
+      10) action_kg_artifacts native ;;
+      11) action_kg_artifacts neo4j ;;
+      12) action_kg_artifacts compare ;;
+      b|B|q|Q) return ;;
+      *) echo "Invalid selection. Please choose 10, 11, 12, or b." ;;
+    esac
+  done
+}
+
 show_menu() {
   echo "======================================"
   echo " Interactive Test Menu"
@@ -506,6 +571,8 @@ show_menu() {
   echo "7) POST sample question to NOA A2A /ask"
   echo "8) Wipe Neo4j graph data"
   echo "9) Send sample question to MAS-LAB-NOA (dual observability mode)"
+  echo "10) Export native and Neo4j KGs, then compare (saved in sandbox)"
+  echo "a) Advanced menu (individual KG actions)"
   echo "q) Quit"
   echo
 }
@@ -547,13 +614,19 @@ main() {
       9)
         action_nine
         ;;
+      10)
+        action_kg_artifacts all
+        ;;
+      a|A)
+        advanced_menu
+        ;;
       q|Q)
         echo "Exiting interactive test menu."
         break
         ;;
       *)
         echo
-        echo "Invalid selection. Please choose 1, 2, 3, 4, 5, 6, 7, 8, 9, or q."
+        echo "Invalid selection. Please choose 1-10, a, or q."
         echo
         ;;
     esac

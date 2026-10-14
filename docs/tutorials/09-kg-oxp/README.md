@@ -169,6 +169,30 @@ file instead.
 
 ## 4 — Equivalence: OTel→KG vs native→KG
 
+### Compare native and norm-worker snapshots
+
+When comparing a native graph with a graph produced by a live norm-worker,
+keep the native graph as a JSON-LD artifact instead of pushing it into the same
+Neo4j database. Matching IDs would otherwise let a later `MERGE` update the
+other route's properties; changing `appName` alone does not isolate identities.
+
+Generate the native KG from the execution's `events.jsonl`, wait for the
+norm-worker to finish processing the corresponding OTel session, and dump
+that Neo4j session into a second JSON-LD artifact. Compare those two files with
+`run_compare_kg` or the `compare_kg` pipeline step. Both files remain unchanged,
+and the report records structural and element-level differences rather than
+byte-identical JSON equality.
+
+The local OXP testing menu's normal option **10** exports both graphs and
+compares the new snapshots in sequence, saving results in its `sandbox/`.
+The **advanced menu** (**a**) offers individual actions **10** (native export),
+**11** (Neo4j snapshot) and **12** (file comparison). Its detailed
+workflow and image rebuild instructions are in
+[the OXP testing README](../../../tests/oxp-norm-testing/README.md#compare-native-and-norm-worker-graphs-without-overwriting).
+Choose snapshots of the same execution, not two independent LLM runs.
+
+### Native and OTel normalization parity
+
 If both paths target the same ontology, they should agree on the same run.
 Default layers and complete layers (all observe-sdk extensions) are both
 checked. Comparison is the canonical call-tree modulo order, not hashed ids,

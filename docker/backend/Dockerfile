@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir uv
 
 # Workspace metadata first (layer cache)
 COPY pyproject.toml ./
+COPY uv.lock ./
 COPY runtime/pyproject.toml runtime/
 COPY ctl/pyproject.toml ctl/
 COPY library-standard/pyproject.toml library-standard/
@@ -22,6 +23,8 @@ COPY library-samples/pyproject.toml library-samples/
 COPY library-lab/pyproject.toml library-lab/
 COPY library-eval/pyproject.toml library-eval/
 COPY library-ioa/pyproject.toml library-ioa/
+COPY library-telemetry/pyproject.toml library-telemetry/
+COPY library-kg/pyproject.toml library-kg/
 COPY lab/pyproject.toml lab/
 COPY lab/components/core/pyproject.toml lab/components/core/
 COPY lab/components/bench/pyproject.toml lab/components/bench/
@@ -36,6 +39,8 @@ COPY library-samples/ library-samples/
 COPY library-lab/ library-lab/
 COPY library-eval/ library-eval/
 COPY library-ioa/ library-ioa/
+COPY library-telemetry/ library-telemetry/
+COPY library-kg/ library-kg/
 COPY lab/ lab/
 
 # Build-time force-include sources: ctl + lab/components/core force-include
@@ -53,7 +58,8 @@ ENV MAS_DATA_ROOT=/data
 ENV MAS_CONTROLLER_PORT=8090
 ENV PYTHONUNBUFFERED=1
 
-RUN uv sync --no-dev
+ARG UV_EXTRAS=""
+RUN if [ -n "$UV_EXTRAS" ]; then uv sync --locked --no-dev --extra "$UV_EXTRAS"; else uv sync --locked --no-dev; fi
 
 COPY docker/backend/entrypoint.sh /usr/local/bin/mas-lab-entrypoint
 RUN chmod +x /usr/local/bin/mas-lab-entrypoint

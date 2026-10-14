@@ -3,7 +3,7 @@ engine:
   execution_strategy: hybrid
 
 cache:
-  path: null 
+  path: null
   read: true
   write: true
 

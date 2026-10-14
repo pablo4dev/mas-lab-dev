@@ -74,3 +74,7 @@ compliance/vendor/
 # .agents/          local harness playbooks (AGENTS.md points here)
 COVERAGE_REPORT.md
 MANIFEST_SCHEMA_MAPPING.md
+# Local read-only KG snapshots and comparison reports from the OXP test menu.
+tests/oxp-norm-testing/exports/
+tests/oxp-norm-testing/traces/
+tests/oxp-norm-testing/sandbox/

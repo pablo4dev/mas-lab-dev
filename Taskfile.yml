@@ -96,6 +96,7 @@ tasks:
           tests/test_lab_manifests_strict.py \
           tests/test_shipped_manifest_separation.py \
           tests/test_workspace_imports.py \
+          tests/test_oxp_kg_artifacts.py \
           runtime/tests/ \
           lab/components/core/tests/ \
           lab/components/bench/tests/ \

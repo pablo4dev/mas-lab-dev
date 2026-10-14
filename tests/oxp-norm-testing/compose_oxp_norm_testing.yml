@@ -255,6 +255,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/backend/Dockerfile
+      args:
+        UV_EXTRAS: oxp-testing
     image: mas-lab-backend:oxp-norm-testing
     extends:
       file: ../../docker/compose.yaml
