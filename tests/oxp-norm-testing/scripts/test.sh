@@ -80,31 +80,34 @@ get_available_sessions() {
 
   table_exists="$(docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database='default' AND name='otel_traces'" </dev/null 2>/dev/null || echo 0)"
   if [[ "$table_exists" == "1" ]]; then
-    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT multiIf(application_id != '', application_id, multiIf(mapContains(SpanAttributes, 'application_id') AND SpanAttributes['application_id'] != '', SpanAttributes['application_id'], multiIf(position(SpanAttributes['session.id'], '_') > 0, substring(SpanAttributes['session.id'], 1, position(SpanAttributes['session.id'], '_') - 1), 'unknown'))) AS app_name, SpanAttributes['session.id'] AS session_id FROM default.otel_traces WHERE mapContains(SpanAttributes, 'session.id') AND SpanAttributes['session.id'] != '' ORDER BY app_name, session_id FORMAT TSV" </dev/null 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT multiIf(application_id != '', application_id, multiIf(mapContains(SpanAttributes, 'application_id') AND SpanAttributes['application_id'] != '', SpanAttributes['application_id'], multiIf(position(SpanAttributes['session.id'], '_') > 0, substring(SpanAttributes['session.id'], 1, position(SpanAttributes['session.id'], '_') - 1), 'unknown'))) AS app_name, SpanAttributes['session.id'] AS session_id, count() AS spans, uniqExactIf(multiIf(SpanAttributes['mas.agent.id'] != '', SpanAttributes['mas.agent.id'], agent_id), multiIf(SpanAttributes['mas.agent.id'] != '', SpanAttributes['mas.agent.id'], agent_id) != '') AS agents, countIf(SpanName LIKE '%.graph') AS graph_spans, countIf(SpanName = 'LLMCall' OR SpanName LIKE '%.chat') AS llm_calls, countIf(SpanName = 'ToolCall' OR SpanName LIKE '%.tool') AS tool_calls FROM default.otel_traces WHERE mapContains(SpanAttributes, 'session.id') AND SpanAttributes['session.id'] != '' GROUP BY app_name, session_id ORDER BY graph_spans DESC, spans DESC FORMAT TSV" </dev/null 2>/dev/null || true
   fi
 
   table_exists="$(docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database='default' AND name='trace_labels'" </dev/null 2>/dev/null || echo 0)"
   if [[ "$table_exists" == "1" ]]; then
-    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT 'unknown' AS app_name, session_id FROM default.trace_labels WHERE session_id != '' ORDER BY app_name, session_id FORMAT TSV" </dev/null 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" exec -T clickhouse clickhouse-client --query "SELECT DISTINCT 'unknown' AS app_name, session_id, '-' AS spans, '-' AS agents, '-' AS graph_spans, '-' AS llm_calls, '-' AS tool_calls FROM default.trace_labels WHERE session_id != '' ORDER BY app_name, session_id FORMAT TSV" </dev/null 2>/dev/null || true
   fi
 }
 
 select_session() {
   local apps=()
   local sessions=()
+  local stats=()
   local selection
   local idx=1
   local line
   local app_name
   local session_id
   local source_mas_id
+  local n_spans n_agents n_graph n_llm n_tools graph_label
 
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
 
     app_name=""
     session_id=""
-    IFS=$'\t' read -r app_name session_id <<< "$line"
+    n_spans="-" n_agents="-" n_graph="-" n_llm="-" n_tools="-"
+    IFS=$'\t' read -r app_name session_id n_spans n_agents n_graph n_llm n_tools <<< "$line"
 
     [[ -z "$app_name" ]] && app_name="unknown"
     [[ -z "$session_id" ]] && continue
@@ -114,9 +117,18 @@ select_session() {
       app_name="$source_mas_id"
     fi
 
+    if [[ "$n_graph" == "-" ]]; then
+      graph_label="?"
+    elif (( n_graph > 0 )); then
+      graph_label="yes($n_graph)"
+    else
+      graph_label="NO"
+    fi
+
     apps+=("$app_name")
     sessions+=("$session_id")
-  done < <(get_available_sessions | sed '/^$/d' | sort -u)
+    stats+=("graph=$graph_label spans=$n_spans agents=$n_agents llm=$n_llm tools=$n_tools")
+  done < <(get_available_sessions | sed '/^$/d' | awk -F'\t' '!seen[$2]++')
 
   if (( ${#sessions[@]} == 0 )); then
     echo "No sessions found in ClickHouse. Generate telemetry first (menu option 2)." >&2
@@ -125,10 +137,11 @@ select_session() {
 
   echo >&2
   echo "Select a session to trigger norm-worker:" >&2
-  echo "  #) [mas_id] session_id" >&2
+  echo "  #) [mas_id] session_id  (graph span, spans, agents, llm calls, tool calls)" >&2
   echo "  --  ----------------------  ----------------------------------------" >&2
+  echo "  Sessions without a graph span produce 0 nodes in Neo4j." >&2
   for selection in "${sessions[@]}"; do
-    echo "  $idx) [${apps[idx-1]}] $selection" >&2
+    echo "  $idx) [${apps[idx-1]}] $selection  ${stats[idx-1]}" >&2
     idx=$((idx + 1))
   done
   echo "  q) Cancel" >&2
